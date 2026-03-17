@@ -1,8 +1,12 @@
 package main
 
 import (
+    "context"
     "log"
     "net/http"
+    "os"
+    "os/signal"
+    "syscall"
 
     "github.com/kishangoli/dengine-v1/config"
     "github.com/kishangoli/dengine-v1/internal/api"
@@ -27,10 +31,23 @@ func main() {
     dependencyRepo := repository.NewSQLiteDependencyRepository(db)
 
     workflowService := service.NewWorkflowService(workflowRepo, taskRepo, dependencyRepo)
-
     workflowHandler := api.NewWorkflowHandler(workflowService)
 
+    scheduler := service.NewScheduler(taskRepo, dependencyRepo)
+
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    go scheduler.Start(ctx)
+
     http.HandleFunc("/workflows", workflowHandler.SubmitWorkflow)
+
+    go func() {
+        c := make(chan os.Signal, 1)
+        signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+        <-c
+        cancel()
+    }()
 
     log.Printf("Starting server on port %s...", cfg.APIPort)
     log.Fatal(http.ListenAndServe(":"+cfg.APIPort, nil))
