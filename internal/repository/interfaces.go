@@ -15,6 +15,7 @@ type TaskRepository interface {
     CreateTask(ctx context.Context, task *domain.Task) error
     GetTask(ctx context.Context, id string) (*domain.Task, error)
     GetTasksByWorkflow(ctx context.Context, workflowID string) ([]*domain.Task, error)
+    GetPendingTasks(ctx context.Context) ([]*domain.Task, error)
     GetRunnableTasks(ctx context.Context) ([]*domain.Task, error)
     UpdateTaskStatus(ctx context.Context, id string, status domain.Status) error
     UpdateTaskOutput(ctx context.Context, id string, output string) error

@@ -3,6 +3,7 @@ package repository
 import (
     "context"
     "database/sql"
+    "log"
     "fmt"
 
     "github.com/kishangoli/dengine-v1/internal/domain"
@@ -48,6 +49,7 @@ func (r *SQLiteDependencyRepository) GetDependencies(ctx context.Context, taskID
 }
 
 func (r *SQLiteDependencyRepository) AreDependenciesMet(ctx context.Context, taskID string) (bool, error) {
+    log.Printf("Checking dependencies for task %s", taskID)
     var count int
     err := r.db.QueryRowContext(ctx,
         `SELECT COUNT(*) FROM task_dependencies td
@@ -56,7 +58,10 @@ func (r *SQLiteDependencyRepository) AreDependenciesMet(ctx context.Context, tas
         taskID, domain.StatusCompleted,
     ).Scan(&count)
     if err != nil {
+        log.Printf("Error checking dependencies for task %s: %v", taskID, err)
         return false, fmt.Errorf("failed to check dependencies: %w", err)
     }
+
+    log.Printf("Task %s has %d unmet dependencies", taskID, count)
     return count == 0, nil
 }
