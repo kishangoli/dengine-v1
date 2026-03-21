@@ -5,9 +5,12 @@ import (
     "fmt"
     "log"
     "time"
+    "encoding/json"
 
     "github.com/kishangoli/dengine-v1/internal/domain"
     "github.com/kishangoli/dengine-v1/internal/repository"
+    "github.com/kishangoli/dengine-v1/internal/executor"
+
 )
 
 type Worker struct {
@@ -15,13 +18,15 @@ type Worker struct {
 
     taskRepo  repository.TaskRepository
     leaseRepo repository.LeaseRepository
+    executors *executor.Registry
 }
 
-func NewWorker(workerID string, taskRepo repository.TaskRepository, leaseRepo repository.LeaseRepository) *Worker {
+func NewWorker(workerID string, taskRepo repository.TaskRepository, leaseRepo repository.LeaseRepository, executors *executor.Registry) *Worker {
     return &Worker{
         workerID:  workerID,
         taskRepo:  taskRepo,
         leaseRepo: leaseRepo,
+        executors:  executors,
     }
 }
 
@@ -89,6 +94,20 @@ func (w *Worker) processTask(ctx context.Context) error {
 
 func (w *Worker) executeTask(ctx context.Context, task *domain.Task) error {
     log.Printf("Worker %s executing task %s of type %s", w.workerID, task.ID, task.Type)
-    time.Sleep(2 * time.Second)
+
+    res, err := w.executors.Execute(ctx, task)
+    if err != nil {
+        return err
+    }
+
+    b, err := json.Marshal(res)
+    if err != nil {
+        return fmt.Errorf("failed to marshal executor result: %w", err)
+    }
+
+    if err := w.taskRepo.UpdateTaskOutput(ctx, task.ID, string(b)); err != nil {
+        return fmt.Errorf("failed to store task output: %w", err)
+    }
+
     return nil
 }
