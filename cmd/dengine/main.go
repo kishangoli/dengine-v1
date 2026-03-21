@@ -9,10 +9,11 @@ import (
     "os/signal"
     "syscall"
     "time"
-    
 
     "github.com/kishangoli/dengine-v1/config"
     "github.com/kishangoli/dengine-v1/internal/api"
+    "github.com/kishangoli/dengine-v1/internal/executor"
+    "github.com/kishangoli/dengine-v1/internal/llm"
     "github.com/kishangoli/dengine-v1/internal/repository"
     "github.com/kishangoli/dengine-v1/internal/service"
 )
@@ -39,13 +40,24 @@ func main() {
 
     scheduler := service.NewScheduler(taskRepo, dependencyRepo)
 
+    openaiClient, err := llm.NewOpenAIClientFromEnv()
+    if err != nil {
+        log.Fatalf("failed to init openai client: %v", err)
+    }
+
+    execRegistry := executor.NewRegistry()
+    llmExec := executor.NewLLMExecutor(openaiClient, "gpt-4.1-mini")
+    execRegistry.Register("extract", llmExec)
+    execRegistry.Register("summarize", llmExec)
+    execRegistry.Register("classify", llmExec)
+
     ctx, cancel := context.WithCancel(context.Background())
     defer cancel()
 
     go scheduler.Start(ctx)
 
     for i := 0; i < 5; i++ {
-        w := service.NewWorker(fmt.Sprintf("worker-%d", i+1), taskRepo, leaseRepo)
+        w := service.NewWorker(fmt.Sprintf("worker-%d", i+1), taskRepo, leaseRepo, execRegistry)
         go w.Start(ctx)
     }
 
