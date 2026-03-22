@@ -2,6 +2,7 @@ package repository
 
 import (
     "context"
+    "time"
     "github.com/kishangoli/dengine-v1/internal/domain"
 )
 
@@ -20,6 +21,16 @@ type TaskRepository interface {
     UpdateTaskStatus(ctx context.Context, id string, status domain.Status) error
     UpdateTaskOutput(ctx context.Context, id string, output string) error
     IncrementRetryCount(ctx context.Context, id string) error
+    IncrementTaskAttempts(ctx context.Context, taskID string) error
+    SetTaskError(ctx context.Context, taskID string, msg string) error
+    ClearTaskError(ctx context.Context, taskID string) error
+
+    SetTaskNextRunAt(ctx context.Context, taskID string, t *time.Time) error
+
+    MarkTaskRunnable(ctx context.Context, taskID string) error
+
+    GetStaleRunningTasks(ctx context.Context, now time.Time) ([]*domain.Task, error)
+
 }
 
 type DependencyRepository interface {

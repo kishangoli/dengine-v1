@@ -15,4 +15,9 @@ type Task struct {
     DependsOn  []string      `json:"depends_on,omitempty"`
     CreatedAt  time.Time     `json:"created_at"`
     UpdatedAt  time.Time     `json:"updated_at"`
+    Attempts    int        `json:"attempts"`
+    MaxAttempts int        `json:"max_attempts"`
+    LastError   *string    `json:"last_error,omitempty"`
+    NextRunAt   *time.Time `json:"next_run_at,omitempty"`
+
 }

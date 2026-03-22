@@ -18,20 +18,42 @@ func NewSQLiteLeaseRepository(db *sql.DB) LeaseRepository {
 }
 
 func (r *SQLiteLeaseRepository) AcquireLease(ctx context.Context, lease *domain.Lease) (bool, error) {
-    result, err := r.db.ExecContext(ctx,
-        "INSERT OR IGNORE INTO leases (task_id, worker_id, expires_at, created_at) VALUES (?, ?, ?, ?)",
+    now := time.Now()
+
+    // Try to take over an expired lease
+    res, err := r.db.ExecContext(ctx,
+        `UPDATE leases
+         SET worker_id = ?, expires_at = ?, created_at = ?
+         WHERE task_id = ? AND expires_at <= ?`,
+        lease.WorkerID, lease.ExpiresAt, lease.CreatedAt,
+        lease.TaskID, now,
+    )
+    if err != nil {
+        return false, fmt.Errorf("failed to acquire lease (update expired): %w", err)
+    }
+    updated, err := res.RowsAffected()
+    if err != nil {
+        return false, fmt.Errorf("failed rows affected (update expired): %w", err)
+    }
+    if updated == 1 {
+        return true, nil
+    }
+
+    // Otherwise try to insert a fresh lease
+    res, err = r.db.ExecContext(ctx,
+        `INSERT OR IGNORE INTO leases (task_id, worker_id, expires_at, created_at)
+         VALUES (?, ?, ?, ?)`,
         lease.TaskID, lease.WorkerID, lease.ExpiresAt, lease.CreatedAt,
     )
     if err != nil {
-        return false, fmt.Errorf("failed to acquire lease: %w", err)
+        return false, fmt.Errorf("failed to acquire lease (insert): %w", err)
     }
-
-    rowsAffected, err := result.RowsAffected()
+    inserted, err := res.RowsAffected()
     if err != nil {
-        return false, fmt.Errorf("failed to check rows affected: %w", err)
+        return false, fmt.Errorf("failed rows affected (insert): %w", err)
     }
 
-    return rowsAffected == 1, nil
+    return inserted == 1, nil
 }
 
 func (r *SQLiteLeaseRepository) RenewLease(ctx context.Context, taskID string, workerID string, newExpiry interface{}) error {

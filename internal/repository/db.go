@@ -4,6 +4,10 @@ import (
     "database/sql"
     "fmt"
     "os"
+    "path/filepath"
+    "sort"
+    "strings"
+
     _ "github.com/mattn/go-sqlite3"
 )
 
@@ -30,14 +34,31 @@ func InitDB(dbPath string) (*sql.DB, error) {
 }
 
 func runMigrations(db *sql.DB) error {
-    migrationSQL, err := os.ReadFile("migrations/001_init.sql")
+    entries, err := os.ReadDir("migrations")
     if err != nil {
-        return fmt.Errorf("failed to read migration file: %w", err)
+        return fmt.Errorf("failed to read migrations dir: %w", err)
     }
 
-    _, err = db.Exec(string(migrationSQL))
-    if err != nil {
-        return fmt.Errorf("failed to execute migration: %w", err)
+    var files []string
+    for _, e := range entries {
+        if e.IsDir() {
+            continue
+        }
+        name := e.Name()
+        if strings.HasSuffix(name, ".sql") {
+            files = append(files, filepath.Join("migrations", name))
+        }
+    }
+
+    sort.Strings(files)
+    for _, f := range files {
+        migrationSQL, err := os.ReadFile(f)
+        if err != nil {
+            return fmt.Errorf("failed to read migration file %s: %w", f, err)
+        }
+        if _, err := db.Exec(string(migrationSQL)); err != nil {
+            return fmt.Errorf("failed to execute migration %s: %w", f, err)
+        }
     }
 
     return nil
