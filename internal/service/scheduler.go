@@ -50,7 +50,13 @@ func (s *Scheduler) run(ctx context.Context) error {
     }
     log.Printf("Scheduler found %d pending tasks", len(tasks))
 
+    now := time.Now()
+
     for _, task := range tasks {
+        if task.NextRunAt != nil && now.Before(*task.NextRunAt) {
+            continue
+        }
+
         depsMet, err := s.dependencyRepo.AreDependenciesMet(ctx, task.ID)
         if err != nil {
             log.Printf("Error checking dependencies for task %s: %v", task.ID, err)

@@ -2,10 +2,10 @@ package service
 
 import (
     "context"
+    "encoding/json"
     "fmt"
     "log"
     "time"
-    "encoding/json"
 
     "github.com/kishangoli/dengine-v1/internal/domain"
     "github.com/kishangoli/dengine-v1/internal/repository"
@@ -49,7 +49,7 @@ func (w *Worker) Start(ctx context.Context) {
     }
 }
 
-func (w *Worker) processTask(ctx context.Context) error {
+func (w *Worker) processTask(ctx context.Context) (err error) {
     tasks, err := w.taskRepo.GetRunnableTasks(ctx)
     if err != nil {
         return fmt.Errorf("failed to query runnable tasks: %w", err)
@@ -75,21 +75,55 @@ func (w *Worker) processTask(ctx context.Context) error {
         return nil
     }
 
+    defer func() {
+        _ = w.leaseRepo.ReleaseLease(ctx, task.ID)
+    }()
+
     if err := w.taskRepo.UpdateTaskStatus(ctx, task.ID, domain.StatusRunning); err != nil {
         return fmt.Errorf("failed to update task status to running: %w", err)
     }
 
     if err := w.executeTask(ctx, task); err != nil {
-        _ = w.taskRepo.UpdateTaskStatus(ctx, task.ID, domain.StatusFailed)
-        return fmt.Errorf("task execution failed: %w", err)
+        _ = w.taskRepo.SetTaskError(ctx, task.ID, err.Error())
+        _ = w.taskRepo.IncrementTaskAttempts(ctx, task.ID)
+
+        attempts := task.Attempts + 1
+        maxAttempts := task.MaxAttempts
+        if maxAttempts == 0 {
+            maxAttempts = 3
+        }
+
+        if attempts >= maxAttempts {
+            _ = w.taskRepo.UpdateTaskStatus(ctx, task.ID, domain.StatusFailed)
+            return fmt.Errorf("task execution failed (max attempts reached): %w", err)
+        }
+
+        delay := time.Duration(1<<max(0, attempts-1)) * 2 * time.Second
+        if delay > 60*time.Second {
+            delay = 60 * time.Second
+        }
+        next := time.Now().Add(delay)
+
+        _ = w.taskRepo.SetTaskNextRunAt(ctx, task.ID, &next)
+        _ = w.taskRepo.MarkTaskRunnable(ctx, task.ID)
+        return fmt.Errorf("task execution failed (will retry): %w", err)
     }
+
+    _ = w.taskRepo.ClearTaskError(ctx, task.ID)
+    _ = w.taskRepo.SetTaskNextRunAt(ctx, task.ID, nil)
 
     if err := w.taskRepo.UpdateTaskStatus(ctx, task.ID, domain.StatusCompleted); err != nil {
         return fmt.Errorf("failed to update task status to completed: %w", err)
     }
 
-    _ = w.leaseRepo.ReleaseLease(ctx, task.ID)
     return nil
+}
+
+func max(a, b int) int {
+    if a > b {
+        return a
+    }
+    return b
 }
 
 func (w *Worker) executeTask(ctx context.Context, task *domain.Task) error {

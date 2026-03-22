@@ -56,6 +56,9 @@ func main() {
 
     go scheduler.Start(ctx)
 
+    reconciler := service.NewReconciler(taskRepo, leaseRepo, 5*time.Second)
+    go reconciler.Start(ctx)
+
     for i := 0; i < 5; i++ {
         w := service.NewWorker(fmt.Sprintf("worker-%d", i+1), taskRepo, leaseRepo, execRegistry)
         go w.Start(ctx)
