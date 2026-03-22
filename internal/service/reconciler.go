@@ -6,25 +6,53 @@ import (
     "time"
 
     "github.com/kishangoli/dengine-v1/internal/domain"
+    "github.com/kishangoli/dengine-v1/internal/events"
     "github.com/kishangoli/dengine-v1/internal/repository"
 )
 
 type Reconciler struct {
     taskRepo  repository.TaskRepository
     leaseRepo repository.LeaseRepository
+    bus       *events.Bus
 
     interval time.Duration
 }
 
-func NewReconciler(taskRepo repository.TaskRepository, leaseRepo repository.LeaseRepository, interval time.Duration) *Reconciler {
+func NewReconciler(taskRepo repository.TaskRepository, leaseRepo repository.LeaseRepository, interval time.Duration, bus *events.Bus) *Reconciler {
     if interval <= 0 {
         interval = 5 * time.Second
     }
     return &Reconciler{
         taskRepo:  taskRepo,
         leaseRepo: leaseRepo,
-        interval: interval,
+        interval:  interval,
+        bus:       bus,
     }
+}
+
+func (r *Reconciler) publishTask(ctx context.Context, workflowID string, taskID string) {
+    if r.bus == nil {
+        return
+    }
+    t, err := r.taskRepo.GetTask(ctx, taskID)
+    if err != nil {
+        return
+    }
+    r.bus.Publish(events.Envelope{
+        Type:       events.TypeTaskUpdated,
+        WorkflowID: workflowID,
+        TaskID:     taskID,
+        At:         time.Now(),
+        Payload: events.TaskUpdated{
+            TaskID:      t.ID,
+            Status:      string(t.Status),
+            Attempts:    t.Attempts,
+            MaxAttempts: t.MaxAttempts,
+            LastError:   t.LastError,
+            NextRunAt:   t.NextRunAt,
+            Output:      &t.Output,
+        },
+    })
 }
 
 func (r *Reconciler) Start(ctx context.Context) {
@@ -63,10 +91,15 @@ func (r *Reconciler) reconcileOnce(ctx context.Context) {
         if t.Attempts >= maxAttempts {
             _ = r.taskRepo.SetTaskError(ctx, t.ID, "stale running task; max attempts reached")
             _ = r.taskRepo.UpdateTaskStatus(ctx, t.ID, domain.StatusFailed)
+
+            r.publishTask(ctx, t.WorkflowID, t.ID)
             continue
         }
 
         _ = r.taskRepo.SetTaskNextRunAt(ctx, t.ID, nil)
         _ = r.taskRepo.MarkTaskRunnable(ctx, t.ID)
+
+        // NEW: publish update
+        r.publishTask(ctx, t.WorkflowID, t.ID)
     }
 }

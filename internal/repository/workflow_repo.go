@@ -51,3 +51,32 @@ func (r *SQLiteWorkflowRepository) UpdateWorkflowStatus(ctx context.Context, id 
     }
     return nil
 }
+
+func (r *SQLiteWorkflowRepository) ListWorkflows(ctx context.Context, limit int) ([]*domain.Workflow, error) {
+    rows, err := r.db.QueryContext(ctx, 
+        `SELECT id, name, status, created_at, updated_at 
+         FROM workflows 
+         ORDER BY created_at DESC 
+         LIMIT ?`, 
+        limit,
+    )
+    if err != nil {
+        return nil, fmt.Errorf("failed to query workflows: %w", err)
+    }
+    defer rows.Close()
+
+    var workflows []*domain.Workflow
+    for rows.Next() {
+        w := &domain.Workflow{}
+        if err := rows.Scan(&w.ID, &w.Name, &w.Status, &w.CreatedAt, &w.UpdatedAt); err != nil {
+            return nil, fmt.Errorf("scan workflow: %w", err)
+        }
+        workflows = append(workflows, w)
+    }
+    
+    if err := rows.Err(); err != nil {
+        return nil, fmt.Errorf("iterate workflows: %w", err)
+    }
+    
+    return workflows, nil
+}

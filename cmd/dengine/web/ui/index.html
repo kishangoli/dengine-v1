@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>dengine | Workflow Engine</title>
+    
+    <!-- Dependencies via CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dagre-d3@0.6.4/dist/dagre-d3.min.js"></script>
+    
+    <!-- Heroicons for SVGs -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <!-- Custom Config for Tailwind -->
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        slate: { 850: '#151a22', 900: '#0f1116' }
+                    }
+                }
+            }
+        }
+    </script>
+    <link rel="stylesheet" href="/ui/style.css" />
+</head>
+<body class="bg-slate-900 text-slate-200 antialiased h-screen overflow-hidden flex flex-col">
+
+    <div id="app" class="h-full flex flex-col">
+        <!-- HEADER -->
+        <header class="h-16 border-b border-slate-700 bg-slate-850 flex items-center justify-between px-6 shrink-0 z-10">
+            <div class="flex items-center gap-3 cursor-pointer" @click="goHome">
+                <div class="w-8 h-8 rounded bg-blue-600 flex items-center justify-center font-bold text-white">D</div>
+                <h1 class="font-bold text-xl tracking-tight text-white">dengine v1</h1>
+            </div>
+            
+            <div class="flex items-center gap-4 text-sm" v-if="currentView === 'graph'">
+                <span class="text-slate-400">Viewing:</span>
+                <span class="font-mono bg-slate-800 px-2 py-1 rounded text-blue-400">{{ activeWorkflowId }}</span>
+                <button @click="goHome" class="text-slate-400 hover:text-white transition-colors">
+                    &larr; Back to List
+                </button>
+            </div>
+        </header>
+
+        <!-- MAIN LAYOUT -->
+        <main class="flex-1 overflow-hidden relative">
+            
+            <!-- VIEW: DASHBOARD (List + Upload) -->
+            <div v-if="currentView === 'dashboard'" class="h-full overflow-y-auto p-8 max-w-5xl mx-auto w-full">
+                
+                <!-- Submission Box -->
+                <div class="bg-slate-850 rounded-xl border border-slate-700 p-6 mb-10 shadow-lg">
+                    <h2 class="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+                        <span>New Workflow</span>
+                    </h2>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 h-64">
+                         <textarea v-model="jsonInput" 
+                            class="w-full h-full bg-slate-900 border border-slate-700 rounded-lg p-4 font-mono text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none resize-none text-slate-300" 
+                            placeholder='Paste JSON here... {"workflow": {...}, "tasks": [...]}'></textarea>
+                        
+                        <div class="flex flex-col justify-center items-center border-2 border-dashed border-slate-700 rounded-lg bg-slate-900/50 hover:bg-slate-900 hover:border-blue-500 transition-all cursor-pointer relative">
+                            <input type="file" @change="handleFile" class="absolute inset-0 opacity-0 cursor-pointer" accept=".json">
+                            <div class="text-center p-4">
+                                <p class="text-blue-400 font-medium mb-1">Click to Upload JSON</p>
+                                <p class="text-slate-500 text-sm">or drag and drop file here</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mt-4 flex justify-end items-center gap-4">
+                        <p v-if="submitStatus" :class="submitError ? 'text-red-400' : 'text-green-400'" class="text-sm">{{ submitStatus }}</p>
+                        <button @click="submitWorkflow" :disabled="isSubmitting" 
+                            class="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded-lg font-medium transition-colors disabled:opacity-50">
+                            {{ isSubmitting ? 'Submitting...' : 'Launch Workflow' }}
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Recent Workflows List -->
+                <h3 class="text-slate-400 font-medium uppercase text-xs tracking-wider mb-4">Recent Workflows</h3>
+                <div class="bg-slate-850 rounded-xl border border-slate-700 overflow-hidden">
+                    <table class="w-full text-left text-sm">
+                        <thead class="bg-slate-800 text-slate-400">
+                            <tr>
+                                <th class="p-4 font-medium">ID</th>
+                                <th class="p-4 font-medium">Name</th>
+                                <th class="p-4 font-medium">Created</th>
+                                <th class="p-4 font-medium">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-700">
+                            <tr v-for="wf in workflows" :key="wf.id" class="hover:bg-slate-800/50 transition-colors">
+                                <td class="p-4 font-mono text-blue-400">{{ wf.id }}</td>
+                                <td class="p-4 text-white font-medium">{{ wf.name }}</td>
+                                <td class="p-4 text-slate-500">{{ formatDate(wf.created_at) }}</td>
+                                <td class="p-4">
+                                    <button @click="viewGraph(wf.id)" class="text-slate-300 hover:text-white bg-slate-700 hover:bg-slate-600 px-3 py-1 rounded text-xs transition-colors">
+                                        View Graph
+                                    </button>
+                                </td>
+                            </tr>
+                            <tr v-if="workflows.length === 0">
+                                <td colspan="4" class="p-8 text-center text-slate-500">No workflows found. Launch one above!</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- VIEW: GRAPH -->
+            <div v-show="currentView === 'graph'" class="h-full w-full relative flex">
+                <!-- SVG Canvas -->
+                <div class="flex-1 h-full bg-slate-900 relative checkerboard">
+                    <svg id="svg-canvas" class="w-full h-full block cursor-grab active:cursor-grabbing"></svg>
+                </div>
+
+                <!-- Detail Sidebar -->
+                <div class="w-96 bg-slate-850 border-l border-slate-700 h-full overflow-y-auto flex flex-col shadow-2xl z-20 transition-transform duration-300"
+                    :class="selectedTask ? 'translate-x-0' : 'translate-x-full absolute right-0'">
+                    
+                    <div v-if="selectedTask" class="p-6">
+                        <div class="flex justify-between items-start mb-6">
+                            <h3 class="text-xl font-bold text-white">{{ selectedTask.id }}</h3>
+                            <button @click="selectedTask = null" class="text-slate-500 hover:text-white">&times;</button>
+                        </div>
+                        
+                        <div class="space-y-6">
+                             <!-- Status Badge -->
+                            <div>
+                                <span class="text-xs uppercase tracking-wider text-slate-500 block mb-1">Status</span>
+                                <span class="px-3 py-1 rounded text-sm font-bold capitalize inline-block" :class="getStatusColor(selectedTask.status)">
+                                    {{ selectedTask.status }}
+                                </span>
+                            </div>
+
+                            <div>
+                                <span class="text-xs uppercase tracking-wider text-slate-500 block mb-1">Type</span>
+                                <code class="bg-slate-900 px-2 py-1 rounded text-blue-300">{{ selectedTask.type }}</code>
+                            </div>
+
+                           <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <span class="text-xs uppercase tracking-wider text-slate-500 block mb-1">Attempts</span>
+                                    <span class="text-slate-300">{{ selectedTask.attempts }} / {{ selectedTask.max_attempts }}</span>
+                                </div>
+                                <div v-if="selectedTask.next_run_at">
+                                    <span class="text-xs uppercase tracking-wider text-slate-500 block mb-1">Next Run</span>
+                                    <span class="text-slate-300 text-xs">{{ formatTime(selectedTask.next_run_at) }}</span>
+                                </div>
+                           </div>
+
+                            <div v-if="selectedTask.last_error">
+                                <span class="text-xs uppercase tracking-wider text-red-500 block mb-1">Last Error</span>
+                                <div class="bg-red-900/20 border border-red-900/50 p-3 rounded text-red-200 text-xs font-mono break-all">
+                                    {{ selectedTask.last_error }}
+                                </div>
+                            </div>
+
+                            <div v-if="selectedTask.output">
+                                <span class="text-xs uppercase tracking-wider text-green-500 block mb-1">Output</span>
+                                <div class="bg-slate-900 border border-slate-700 p-3 rounded text-slate-300 text-xs font-utf-8 whitespace-pre-wrap max-h-60 overflow-y-auto">
+                                    {{ selectedTask.output }}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div v-else class="h-full flex items-center justify-center text-slate-500 text-sm p-4 text-center">
+                        Select a task node to view details.
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="/ui/app.js"></script>
+</body>
+</html>

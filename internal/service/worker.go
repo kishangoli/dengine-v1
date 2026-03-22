@@ -5,28 +5,40 @@ import (
     "encoding/json"
     "fmt"
     "log"
+    "strings"
     "time"
 
     "github.com/kishangoli/dengine-v1/internal/domain"
-    "github.com/kishangoli/dengine-v1/internal/repository"
+    "github.com/kishangoli/dengine-v1/internal/events"
     "github.com/kishangoli/dengine-v1/internal/executor"
-
+    "github.com/kishangoli/dengine-v1/internal/repository"
 )
 
 type Worker struct {
     workerID string
 
-    taskRepo  repository.TaskRepository
-    leaseRepo repository.LeaseRepository
-    executors *executor.Registry
+    taskRepo       repository.TaskRepository
+    leaseRepo      repository.LeaseRepository
+    dependencyRepo repository.DependencyRepository
+    executors      *executor.Registry
+    bus            *events.Bus
 }
 
-func NewWorker(workerID string, taskRepo repository.TaskRepository, leaseRepo repository.LeaseRepository, executors *executor.Registry) *Worker {
+func NewWorker(
+    workerID string,
+    taskRepo repository.TaskRepository,
+    leaseRepo repository.LeaseRepository,
+    dependencyRepo repository.DependencyRepository,
+    executors *executor.Registry,
+    bus *events.Bus,
+) *Worker {
     return &Worker{
-        workerID:  workerID,
-        taskRepo:  taskRepo,
-        leaseRepo: leaseRepo,
-        executors:  executors,
+        workerID:       workerID,
+        taskRepo:       taskRepo,
+        leaseRepo:      leaseRepo,
+        dependencyRepo: dependencyRepo,
+        executors:      executors,
+        bus:            bus,
     }
 }
 
@@ -82,12 +94,18 @@ func (w *Worker) processTask(ctx context.Context) (err error) {
     if err := w.taskRepo.UpdateTaskStatus(ctx, task.ID, domain.StatusRunning); err != nil {
         return fmt.Errorf("failed to update task status to running: %w", err)
     }
+    w.publishTask(ctx, task.WorkflowID, task.ID)
 
     if err := w.executeTask(ctx, task); err != nil {
         _ = w.taskRepo.SetTaskError(ctx, task.ID, err.Error())
         _ = w.taskRepo.IncrementTaskAttempts(ctx, task.ID)
 
-        attempts := task.Attempts + 1
+        fresh, getErr := w.taskRepo.GetTask(ctx, task.ID)
+        if getErr == nil {
+            task = fresh
+        }
+
+        attempts := task.Attempts
         maxAttempts := task.MaxAttempts
         if maxAttempts == 0 {
             maxAttempts = 3
@@ -95,6 +113,7 @@ func (w *Worker) processTask(ctx context.Context) (err error) {
 
         if attempts >= maxAttempts {
             _ = w.taskRepo.UpdateTaskStatus(ctx, task.ID, domain.StatusFailed)
+            w.publishTask(ctx, task.WorkflowID, task.ID)
             return fmt.Errorf("task execution failed (max attempts reached): %w", err)
         }
 
@@ -106,6 +125,8 @@ func (w *Worker) processTask(ctx context.Context) (err error) {
 
         _ = w.taskRepo.SetTaskNextRunAt(ctx, task.ID, &next)
         _ = w.taskRepo.MarkTaskRunnable(ctx, task.ID)
+        w.publishTask(ctx, task.WorkflowID, task.ID)
+
         return fmt.Errorf("task execution failed (will retry): %w", err)
     }
 
@@ -115,6 +136,7 @@ func (w *Worker) processTask(ctx context.Context) (err error) {
     if err := w.taskRepo.UpdateTaskStatus(ctx, task.ID, domain.StatusCompleted); err != nil {
         return fmt.Errorf("failed to update task status to completed: %w", err)
     }
+    w.publishTask(ctx, task.WorkflowID, task.ID)
 
     return nil
 }
@@ -129,7 +151,14 @@ func max(a, b int) int {
 func (w *Worker) executeTask(ctx context.Context, task *domain.Task) error {
     log.Printf("Worker %s executing task %s of type %s", w.workerID, task.ID, task.Type)
 
-    res, err := w.executors.Execute(ctx, task)
+    enriched, err := w.enrichInputWithDependencyOutputs(ctx, task)
+    if err != nil {
+        return err
+    }
+    taskToRun := *task
+    taskToRun.Input = enriched
+
+    res, err := w.executors.Execute(ctx, &taskToRun)
     if err != nil {
         return err
     }
@@ -143,5 +172,75 @@ func (w *Worker) executeTask(ctx context.Context, task *domain.Task) error {
         return fmt.Errorf("failed to store task output: %w", err)
     }
 
+    w.publishTask(ctx, task.WorkflowID, task.ID)
     return nil
+}
+
+func (w *Worker) enrichInputWithDependencyOutputs(ctx context.Context, task *domain.Task) (string, error) {
+    if w.dependencyRepo == nil {
+        return task.Input, nil
+    }
+
+    deps, err := w.dependencyRepo.GetDependencies(ctx, task.ID)
+    if err != nil {
+        return "", fmt.Errorf("failed to load dependencies for task %s: %w", task.ID, err)
+    }
+    if len(deps) == 0 {
+        return task.Input, nil
+    }
+
+    var sb strings.Builder
+    sb.WriteString("UPSTREAM TASK OUTPUTS (JSON):\n")
+
+    for _, d := range deps {
+        up, err := w.taskRepo.GetTask(ctx, d.DependsOnID)
+        if err != nil {
+            return "", fmt.Errorf("failed to load upstream task %s for task %s: %w", d.DependsOnID, task.ID, err)
+        }
+
+        out := strings.TrimSpace(up.Output)
+        if out == "" {
+            out = `""`
+        }
+
+        sb.WriteString("- ")
+        sb.WriteString(up.ID)
+        sb.WriteString(" (")
+        sb.WriteString(up.Type)
+        sb.WriteString("): ")
+        sb.WriteString(out)
+        sb.WriteString("\n")
+    }
+
+    sb.WriteString("\nORIGINAL INPUT:\n")
+    sb.WriteString(strings.TrimSpace(task.Input))
+    sb.WriteString("\n")
+
+    return sb.String(), nil
+}
+
+func (w *Worker) publishTask(ctx context.Context, workflowID string, taskID string) {
+    if w.bus == nil {
+        return
+    }
+    t, err := w.taskRepo.GetTask(ctx, taskID)
+    if err != nil {
+        return
+    }
+    output := t.Output
+    w.bus.Publish(events.Envelope{
+        Type:       events.TypeTaskUpdated,
+        WorkflowID: workflowID,
+        TaskID:     taskID,
+        At:         time.Now(),
+        Payload: events.TaskUpdated{
+            TaskID:      t.ID,
+            Status:      string(t.Status),
+            Attempts:    t.Attempts,
+            MaxAttempts: t.MaxAttempts,
+            LastError:   t.LastError,
+            NextRunAt:   t.NextRunAt,
+            Output:      &output,
+        },
+    })
 }
