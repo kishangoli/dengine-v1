@@ -34,9 +34,37 @@ func InitDB(dbPath string) (*sql.DB, error) {
 }
 
 func runMigrations(db *sql.DB) error {
-    entries, err := os.ReadDir("migrations")
+    candidates := []string{"migrations"}
+
+    if exe, err := os.Executable(); err == nil {
+        exeDir := filepath.Dir(exe)
+        candidates = append(candidates,
+            filepath.Join(exeDir, "migrations"),
+            filepath.Join(exeDir, "..", "..", "migrations"), 
+        )
+    }
+
+    if wd, err := os.Getwd(); err == nil {
+        for i := 0; i < 5; i++ {
+            candidates = append(candidates, filepath.Join(wd, strings.Repeat("../", i), "migrations"))
+        }
+    }
+
+    var migDir string
+    for _, c := range candidates {
+        clean := filepath.Clean(c)
+        if st, err := os.Stat(clean); err == nil && st.IsDir() {
+            migDir = clean
+            break
+        }
+    }
+    if migDir == "" {
+        return fmt.Errorf("failed to locate migrations dir; tried: %v", candidates)
+    }
+
+    entries, err := os.ReadDir(migDir)
     if err != nil {
-        return fmt.Errorf("failed to read migrations dir: %w", err)
+        return fmt.Errorf("failed to read migrations dir (%s): %w", migDir, err)
     }
 
     var files []string
@@ -46,7 +74,7 @@ func runMigrations(db *sql.DB) error {
         }
         name := e.Name()
         if strings.HasSuffix(name, ".sql") {
-            files = append(files, filepath.Join("migrations", name))
+            files = append(files, filepath.Join(migDir, name))
         }
     }
 

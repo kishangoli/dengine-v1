@@ -11,6 +11,19 @@ import (
     "time"
 )
 
+// OpenAI enforces a minimum max_output_tokens (currently 16).
+const minMaxOutputTokens = 16
+
+func clampMaxOutput(n int) int {
+    if n <= 0 {
+        return minMaxOutputTokens
+    }
+    if n < minMaxOutputTokens {
+        return minMaxOutputTokens
+    }
+    return n
+}
+
 type Client interface {
     GenerateText(ctx context.Context, req GenerateTextRequest) (string, error)
 }
@@ -54,9 +67,8 @@ func (c *OpenAIClient) GenerateText(ctx context.Context, req GenerateTextRequest
     if req.Temperature == 0 {
         req.Temperature = 0.2
     }
-    if req.MaxOutput == 0 {
-        req.MaxOutput = 128
-    }
+
+    req.MaxOutput = clampMaxOutput(req.MaxOutput)
 
     payload := map[string]any{
         "model": req.Model,

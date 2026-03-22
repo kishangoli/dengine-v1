@@ -65,3 +65,28 @@ func (r *SQLiteDependencyRepository) AreDependenciesMet(ctx context.Context, tas
     log.Printf("Task %s has %d unmet dependencies", taskID, count)
     return count == 0, nil
 }
+
+func (r *SQLiteDependencyRepository) GetDependenciesByWorkflow(ctx context.Context, workflowID string) ([]*domain.TaskDependency, error) {
+    rows, err := r.db.QueryContext(ctx, `
+        SELECT td.task_id, td.depends_on_id
+        FROM task_dependencies td
+        JOIN tasks t ON t.id = td.task_id
+        WHERE t.workflow_id = ?`, workflowID)
+    if err != nil {
+        return nil, fmt.Errorf("get dependencies by workflow: %w", err)
+    }
+    defer rows.Close()
+
+    var out []*domain.TaskDependency
+    for rows.Next() {
+        d := &domain.TaskDependency{}
+        if err := rows.Scan(&d.TaskID, &d.DependsOnID); err != nil {
+            return nil, fmt.Errorf("scan dependency: %w", err)
+        }
+        out = append(out, d)
+    }
+    if err := rows.Err(); err != nil {
+        return nil, fmt.Errorf("iterate dependencies: %w", err)
+    }
+    return out, nil
+}

@@ -136,3 +136,7 @@ func validateWorkflow(workflow *domain.Workflow, tasks []*domain.Task) error {
 
     return nil
 }
+
+func (s *WorkflowService) ListWorkflows(ctx context.Context, limit int) ([]*domain.Workflow, error) {
+    return s.workflowRepo.ListWorkflows(ctx, limit)
+}

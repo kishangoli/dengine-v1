@@ -3,6 +3,7 @@ package api
 import (
     "encoding/json"
     "net/http"
+    "log"
 
     "github.com/kishangoli/dengine-v1/internal/domain"
     "github.com/kishangoli/dengine-v1/internal/service"
@@ -35,4 +36,19 @@ func (h *WorkflowHandler) SubmitWorkflow(w http.ResponseWriter, r *http.Request)
     }
 
     w.WriteHeader(http.StatusCreated)
+}
+
+func (h *WorkflowHandler) ListWorkflows(w http.ResponseWriter, r *http.Request) {
+    ctx := r.Context()
+    // Hardcoded limit of 50 for now
+    workflows, err := h.workflowService.ListWorkflows(ctx, 50) 
+    if err != nil {
+        http.Error(w, "failed to list workflows: "+err.Error(), http.StatusInternalServerError)
+        return
+    }
+
+    w.Header().Set("Content-Type", "application/json")
+    if err := json.NewEncoder(w).Encode(workflows); err != nil {
+        log.Printf("failed to encode response: %v", err)
+    }
 }

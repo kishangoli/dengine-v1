@@ -16,6 +16,7 @@ import (
     "github.com/kishangoli/dengine-v1/internal/llm"
     "github.com/kishangoli/dengine-v1/internal/repository"
     "github.com/kishangoli/dengine-v1/internal/service"
+    "github.com/kishangoli/dengine-v1/internal/events"
 )
 
 func main() {
@@ -35,10 +36,15 @@ func main() {
     dependencyRepo := repository.NewSQLiteDependencyRepository(db)
     leaseRepo := repository.NewSQLiteLeaseRepository(db)
 
+    bus := events.NewBus()
+
     workflowService := service.NewWorkflowService(workflowRepo, taskRepo, dependencyRepo)
     workflowHandler := api.NewWorkflowHandler(workflowService)
 
-    scheduler := service.NewScheduler(taskRepo, dependencyRepo)
+    graphHandler := api.NewGraphHandler(workflowRepo, taskRepo, dependencyRepo)
+    wsHandler := api.NewWSHandler(bus)
+
+    scheduler := service.NewScheduler(taskRepo, dependencyRepo, bus)
 
     openaiClient, err := llm.NewOpenAIClientFromEnv()
     if err != nil {
@@ -56,17 +62,32 @@ func main() {
 
     go scheduler.Start(ctx)
 
-    reconciler := service.NewReconciler(taskRepo, leaseRepo, 5*time.Second)
+    reconciler := service.NewReconciler(taskRepo, leaseRepo, 5*time.Second, bus)
     go reconciler.Start(ctx)
 
     for i := 0; i < 5; i++ {
-        w := service.NewWorker(fmt.Sprintf("worker-%d", i+1), taskRepo, leaseRepo, execRegistry)
+        w := service.NewWorker(
+            fmt.Sprintf("worker-%d", i+1),
+            taskRepo,
+            leaseRepo,
+            dependencyRepo,
+            execRegistry,
+            bus,
+        )
         go w.Start(ctx)
     }
 
     mux := http.NewServeMux()
     mux.HandleFunc("/workflows", workflowHandler.SubmitWorkflow)
-
+    mux.HandleFunc("/api/workflows", workflowHandler.ListWorkflows) 
+    mux.HandleFunc("/api/workflows/", graphHandler.GetWorkflowGraph)
+    mux.HandleFunc("/ws", wsHandler.ServeWS)
+    ui, err := uiHandler()
+    if err != nil {
+        log.Fatalf("failed to init ui handler: %v", err)
+    }
+    mux.Handle("/ui/", ui)    
+    
     srv := &http.Server{
         Addr:    ":" + cfg.APIPort,
         Handler: mux,

@@ -6,19 +6,21 @@ import (
     "time"
 
     "github.com/kishangoli/dengine-v1/internal/domain"
+    "github.com/kishangoli/dengine-v1/internal/events"
     "github.com/kishangoli/dengine-v1/internal/repository"
-
 )
 
 type Scheduler struct {
     taskRepo       repository.TaskRepository
     dependencyRepo repository.DependencyRepository
+    bus            *events.Bus
 }
 
-func NewScheduler(taskRepo repository.TaskRepository, dependencyRepo repository.DependencyRepository) *Scheduler {
+func NewScheduler(taskRepo repository.TaskRepository, dependencyRepo repository.DependencyRepository, bus *events.Bus) *Scheduler {
     return &Scheduler{
         taskRepo:       taskRepo,
         dependencyRepo: dependencyRepo,
+        bus:            bus,
     }
 }
 
@@ -38,6 +40,31 @@ func (s *Scheduler) Start(ctx context.Context) {
             }
         }
     }
+}
+
+func (s *Scheduler) publishTask(ctx context.Context, workflowID string, taskID string) {
+    if s.bus == nil {
+        return
+    }
+    t, err := s.taskRepo.GetTask(ctx, taskID)
+    if err != nil {
+        return
+    }
+    s.bus.Publish(events.Envelope{
+        Type:       events.TypeTaskUpdated,
+        WorkflowID: workflowID,
+        TaskID:     taskID,
+        At:         time.Now(),
+        Payload: events.TaskUpdated{
+            TaskID:      t.ID,
+            Status:      string(t.Status),
+            Attempts:    t.Attempts,
+            MaxAttempts: t.MaxAttempts,
+            LastError:   t.LastError,
+            NextRunAt:   t.NextRunAt,
+            Output:      &t.Output,
+        },
+    })
 }
 
 func (s *Scheduler) run(ctx context.Context) error {
@@ -69,6 +96,8 @@ func (s *Scheduler) run(ctx context.Context) error {
                 return err
             }
             log.Printf("Task %s marked as runnable", task.ID)
+
+            s.publishTask(ctx, task.WorkflowID, task.ID)
         }
     }
 

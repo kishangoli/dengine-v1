@@ -10,6 +10,8 @@ type WorkflowRepository interface {
     CreateWorkflow(ctx context.Context, workflow *domain.Workflow) error
     GetWorkflow(ctx context.Context, id string) (*domain.Workflow, error)
     UpdateWorkflowStatus(ctx context.Context, id string, status domain.Status) error
+    ListWorkflows(ctx context.Context, limit int) ([]*domain.Workflow, error)
+
 }
 
 type TaskRepository interface {
@@ -37,6 +39,8 @@ type DependencyRepository interface {
     CreateDependency(ctx context.Context, dep *domain.TaskDependency) error
     GetDependencies(ctx context.Context, taskID string) ([]*domain.TaskDependency, error)
     AreDependenciesMet(ctx context.Context, taskID string) (bool, error)
+    GetDependenciesByWorkflow(ctx context.Context, workflowID string) ([]*domain.TaskDependency, error)
+
 }
 
 type LeaseRepository interface {

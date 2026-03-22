@@ -79,6 +79,6 @@ func (e *LLMExecutor) classify(ctx context.Context, input string) (string, error
         SystemPrompt: "Classify the text into a single short label. Output only the label.",
         UserPrompt:   input,
         Temperature:  0,
-        MaxOutput:    10,
+        MaxOutput:    16,
     })
 }

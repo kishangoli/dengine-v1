@@ -1,0 +1,41 @@
+
+.checkerboard {
+  background-image: radial-gradient(#1e293b 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+.node rect {
+  stroke-width: 2px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.node:hover rect {
+  stroke: white;
+  stroke-width: 3px;
+  filter: drop-shadow(0 0 8px rgba(96, 165, 250, 0.5));
+}
+
+.node text {
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-weight: 600;
+  pointer-events: none;
+}
+
+.edgePath path {
+  stroke: #475569; /* slate-600 */
+  stroke-width: 2px;
+  fill: none;
+}
+.edgePath defs marker path {
+  fill: #475569;
+}
+
+.node.pending rect   { fill: #1e293b; stroke: #475569; } 
+.node.runnable rect  { fill: #334155; stroke: #94a3b8; }
+.node.running rect   { fill: #2563eb; stroke: #60a5fa; } 
+.node.completed rect { fill: #16a34a; stroke: #4ade80; } 
+.node.failed rect    { fill: #dc2626; stroke: #f87171; } 
+.node.workflow rect  { fill: #4f46e5; stroke: #818cf8; rx: 50%; ry: 50%; }
+
+.node.workflow text { fill: #ffffff; font-weight: 800; }

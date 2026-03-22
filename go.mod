@@ -1,8 +1,9 @@
 module github.com/kishangoli/dengine-v1
 
-go 1.26.1
+go 1.23
 
 require (
-	github.com/joho/godotenv v1.5.1 // indirect
-	github.com/mattn/go-sqlite3 v1.14.34 // indirect
+	github.com/gorilla/websocket v1.5.3
+	github.com/joho/godotenv v1.5.1
+	github.com/mattn/go-sqlite3 v1.14.34
 )
