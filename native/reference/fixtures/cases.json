@@ -1,0 +1,24 @@
+[
+  {
+    "name": "punctuation",
+    "kind": "raw",
+    "text": "Hello, world!"
+  },
+  {
+    "name": "whitespace",
+    "kind": "raw",
+    "text": "  The quick brown fox\n"
+  },
+  {
+    "name": "unicode",
+    "kind": "raw",
+    "text": "Café ☕ — привет"
+  },
+  {
+    "name": "chat",
+    "kind": "chat",
+    "messages": [
+      {"role": "user", "content": "Answer in one sentence: what is a comet?"}
+    ]
+  }
+]
