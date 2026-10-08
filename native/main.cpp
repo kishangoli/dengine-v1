@@ -3,6 +3,7 @@
 #include <string>
 
 #include "nlohmann/json.hpp"
+#include "dengine/model_loader.hpp"
 
 namespace {
 
@@ -102,7 +103,42 @@ bool write_response(const json& response) {
 
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
+    if (argc != 1) {
+        if (argc != 3 || std::string(argv[1]) != "--inspect-model") {
+            std::cerr << "usage: dengine-native [--inspect-model MODEL_DIRECTORY]\n";
+            return 2;
+        }
+        try {
+            const auto model = dengine::load_model(argv[2]);
+            json tensors = json::array();
+            for (const auto& item : model.tensors()) {
+                const auto first_bits = model.tensor(item.first).bf16_bits(
+                    item.second.shape.dimensions().size() == 1
+                        ? std::initializer_list<std::size_t>{0}
+                        : std::initializer_list<std::size_t>{0, 0});
+                tensors.push_back({{"name", item.first},
+                                   {"shape", item.second.shape.dimensions()},
+                                   {"dtype", "BF16"},
+                                   {"first_bf16_bits", first_bits}});
+            }
+            const auto& config = model.config();
+            std::cout << json({{"model", "SmolLM2-135M-Instruct"},
+                               {"tensor_count", tensors.size()},
+                               {"file_bytes", model.file_bytes()},
+                               {"parameters", config.parameter_count()},
+                               {"config", {{"layers", config.layers},
+                                           {"hidden_size", config.hidden_size},
+                                           {"query_heads", config.query_heads},
+                                           {"kv_heads", config.kv_heads},
+                                           {"vocab_size", config.vocab_size}}},
+                               {"tensors", std::move(tensors)}}).dump() << '\n';
+            return std::cout ? 0 : 1;
+        } catch (const std::exception& error) {
+            std::cerr << "model inspection failed: " << error.what() << '\n';
+            return 1;
+        }
+    }
     std::string line;
     for (;;) {
         switch (read_line(line)) {
