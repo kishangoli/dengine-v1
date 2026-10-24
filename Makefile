@@ -6,6 +6,8 @@ MODEL_DATA_HEADER = native/include/dengine/model_data.hpp
 MODEL_LOADER_HEADER = native/include/dengine/model_loader.hpp
 MODEL_DATA_TEST = native/.build/test_model_data
 MODEL_LOADER_TEST = native/.build/test_model_loader
+CPU_MATH_TEST = native/.build/test_cpu_math
+CPU_MATH_HEADER = native/include/dengine/cpu_math.hpp
 TOKENIZER_EXE = native/dengine-tokenizer
 TOKENIZER_SRC = native/tokenizer_main.cpp native/src/tokenizer.cpp
 TOKENIZER_HEADER = native/include/dengine/tokenizer.hpp
@@ -26,15 +28,20 @@ $(MODEL_LOADER_TEST): native/tests/test_model_loader.cpp native/src/model_data.c
 	mkdir -p native/.build
 	$(CXX) $(CXXFLAGS) -I native/include -I native/third_party native/tests/test_model_loader.cpp native/src/model_data.cpp native/src/model_loader.cpp -o $(MODEL_LOADER_TEST)
 
+$(CPU_MATH_TEST): native/tests/test_cpu_math.cpp native/src/cpu_math.cpp native/src/model_data.cpp $(CPU_MATH_HEADER) $(MODEL_DATA_HEADER)
+	mkdir -p native/.build
+	$(CXX) $(CXXFLAGS) -I native/include native/tests/test_cpu_math.cpp native/src/cpu_math.cpp native/src/model_data.cpp -o $(CPU_MATH_TEST)
+
 tokenizer: $(TOKENIZER_EXE)
 
 $(TOKENIZER_EXE): $(TOKENIZER_SRC) $(TOKENIZER_HEADER) $(JSON_HEADER)
 	$(CXX) $(CXXFLAGS) -I native/include -I native/third_party $(TOKENIZER_SRC) -licucore -o $(TOKENIZER_EXE)
 
-test: $(NATIVE_EXE) $(MODEL_DATA_TEST) $(MODEL_LOADER_TEST)
+test: $(NATIVE_EXE) $(MODEL_DATA_TEST) $(MODEL_LOADER_TEST) $(CPU_MATH_TEST)
 	python3 native/tests/test_protocol.py $(NATIVE_EXE)
 	./$(MODEL_DATA_TEST)
 	./$(MODEL_LOADER_TEST)
+	./$(CPU_MATH_TEST)
 
 test-model: $(NATIVE_EXE)
 	python3 native/tests/test_model_inspection.py $(NATIVE_EXE) native/models/smollm2-135m-instruct
