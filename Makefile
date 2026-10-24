@@ -8,12 +8,14 @@ MODEL_DATA_TEST = native/.build/test_model_data
 MODEL_LOADER_TEST = native/.build/test_model_loader
 CPU_MATH_TEST = native/.build/test_cpu_math
 CPU_MATH_HEADER = native/include/dengine/cpu_math.hpp
+BLOCK_TEST = native/.build/test_transformer_block
+BLOCK_HEADER = native/include/dengine/transformer_block.hpp
 TOKENIZER_EXE = native/dengine-tokenizer
 TOKENIZER_SRC = native/tokenizer_main.cpp native/src/tokenizer.cpp
 TOKENIZER_HEADER = native/include/dengine/tokenizer.hpp
 JSON_HEADER = native/third_party/nlohmann/json.hpp
 
-.PHONY: all tokenizer test test-model test-tokenizer clean
+.PHONY: all tokenizer test test-model test-tokenizer test-block clean
 
 all: $(NATIVE_EXE)
 
@@ -32,6 +34,10 @@ $(CPU_MATH_TEST): native/tests/test_cpu_math.cpp native/src/cpu_math.cpp native/
 	mkdir -p native/.build
 	$(CXX) $(CXXFLAGS) -I native/include native/tests/test_cpu_math.cpp native/src/cpu_math.cpp native/src/model_data.cpp -o $(CPU_MATH_TEST)
 
+$(BLOCK_TEST): native/tests/test_transformer_block.cpp native/src/transformer_block.cpp native/src/cpu_math.cpp native/src/model_data.cpp native/src/model_loader.cpp $(BLOCK_HEADER) $(CPU_MATH_HEADER) $(MODEL_DATA_HEADER) $(MODEL_LOADER_HEADER) $(JSON_HEADER)
+	mkdir -p native/.build
+	$(CXX) $(CXXFLAGS) -I native/include -I native/third_party native/tests/test_transformer_block.cpp native/src/transformer_block.cpp native/src/cpu_math.cpp native/src/model_data.cpp native/src/model_loader.cpp -o $(BLOCK_TEST)
+
 tokenizer: $(TOKENIZER_EXE)
 
 $(TOKENIZER_EXE): $(TOKENIZER_SRC) $(TOKENIZER_HEADER) $(JSON_HEADER)
@@ -48,6 +54,9 @@ test-model: $(NATIVE_EXE)
 
 test-tokenizer: $(TOKENIZER_EXE)
 	native/reference/.venv/bin/python native/tests/test_tokenizer_reference.py $(TOKENIZER_EXE) native/models/smollm2-135m-instruct
+
+test-block: $(BLOCK_TEST)
+	./$(BLOCK_TEST) native/models/smollm2-135m-instruct native/reference/fixtures/block_layer0.json
 
 clean:
 	rm -f $(NATIVE_EXE)
