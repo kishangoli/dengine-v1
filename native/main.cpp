@@ -3,6 +3,7 @@
 #include <string>
 
 #include "nlohmann/json.hpp"
+#include "dengine/generator.hpp"
 #include "dengine/model_loader.hpp"
 
 namespace {
@@ -65,7 +66,7 @@ json error_response(const json& id, const char* code, const char* message) {
             {"error", {{"code", code}, {"message", message}}}};
 }
 
-json process(const std::string& line) {
+json process(const std::string& line, const dengine::Generator* generator) {
     const json request = json::parse(line, nullptr, false);
     if (request.is_discarded()) {
         return error_response(nullptr, "invalid_json", "request must be valid JSON");
@@ -92,8 +93,43 @@ json process(const std::string& line) {
         return error_response(id, "invalid_request", "prompt must be a nonempty string");
     }
 
-    return {{"id", id}, {"ok", true},
-            {"text", "echo: " + prompt_field->get<std::string>()}};
+    if (!generator) {
+        return {{"id", id}, {"ok", true},
+                {"text", "echo: " + prompt_field->get<std::string>()}};
+    }
+
+    const auto limit_field = request.find("max_new_tokens");
+    std::size_t limit = dengine::kDefaultNewTokens;
+    if (limit_field != request.end()) {
+        if (!limit_field->is_number_unsigned() ||
+            limit_field->get<std::uint64_t>() == 0 ||
+            limit_field->get<std::uint64_t>() > dengine::kMaxNewTokens) {
+            return error_response(id, "invalid_request", "max_new_tokens must be between 1 and 64");
+        }
+        limit = limit_field->get<std::size_t>();
+    }
+    std::string stop;
+    const auto stop_field = request.find("stop");
+    if (stop_field != request.end()) {
+        if (!stop_field->is_string() || stop_field->get_ref<const std::string&>().empty()) {
+            return error_response(id, "invalid_request", "stop must be a nonempty string");
+        }
+        stop = stop_field->get<std::string>();
+    }
+    try {
+        const auto result = generator->generate(prompt_field->get_ref<const std::string&>(),
+                                                limit, stop);
+        return {{"id", id}, {"ok", true}, {"text", result.text},
+                {"generated_ids", result.generated_ids},
+                {"prompt_tokens", result.prompt_tokens},
+                {"finish_reason", result.finish_reason}};
+    } catch (const std::invalid_argument& error) {
+        return error_response(id, "invalid_request", error.what());
+    } catch (const std::out_of_range& error) {
+        return error_response(id, "context_limit", error.what());
+    } catch (const std::exception& error) {
+        return error_response(id, "generation_failed", error.what());
+    }
 }
 
 bool write_response(const json& response) {
@@ -101,14 +137,48 @@ bool write_response(const json& response) {
     return static_cast<bool>(std::cout);
 }
 
+int serve(const dengine::Generator* generator) {
+    std::string line;
+    for (;;) {
+        switch (read_line(line)) {
+            case ReadResult::end:
+                return 0;
+            case ReadResult::failure:
+                std::cerr << "failed to read stdin\n";
+                return 1;
+            case ReadResult::too_large:
+                if (!write_response(error_response(
+                        nullptr, "request_too_large", "request exceeds 65536 bytes"))) {
+                    std::cerr << "failed to write stdout\n";
+                    return 1;
+                }
+                break;
+            case ReadResult::line:
+                if (!write_response(process(line, generator))) {
+                    std::cerr << "failed to write stdout\n";
+                    return 1;
+                }
+                break;
+        }
+    }
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
-    if (argc != 1) {
-        if (argc != 3 || std::string(argv[1]) != "--inspect-model") {
-            std::cerr << "usage: dengine-native [--inspect-model MODEL_DIRECTORY]\n";
-            return 2;
+    if (argc == 2 && std::string(argv[1]) == "--echo") return serve(nullptr);
+    if (argc == 3 && std::string(argv[1]) == "--model") {
+        try {
+            const dengine::InferenceModel model(argv[2]);
+            const auto tokenizer = dengine::Tokenizer::load(argv[2]);
+            const dengine::Generator generator(model, tokenizer);
+            return serve(&generator);
+        } catch (const std::exception& error) {
+            std::cerr << "generation startup failed: " << error.what() << '\n';
+            return 1;
         }
+    }
+    if (argc == 3 && std::string(argv[1]) == "--inspect-model") {
         try {
             const auto model = dengine::load_model(argv[2]);
             json tensors = json::array();
@@ -139,27 +209,6 @@ int main(int argc, char** argv) {
             return 1;
         }
     }
-    std::string line;
-    for (;;) {
-        switch (read_line(line)) {
-            case ReadResult::end:
-                return 0;
-            case ReadResult::failure:
-                std::cerr << "failed to read stdin\n";
-                return 1;
-            case ReadResult::too_large:
-                if (!write_response(error_response(
-                        nullptr, "request_too_large", "request exceeds 65536 bytes"))) {
-                    std::cerr << "failed to write stdout\n";
-                    return 1;
-                }
-                break;
-            case ReadResult::line:
-                if (!write_response(process(line))) {
-                    std::cerr << "failed to write stdout\n";
-                    return 1;
-                }
-                break;
-        }
-    }
+    std::cerr << "usage: dengine-native --model MODEL_DIRECTORY | --inspect-model MODEL_DIRECTORY | --echo\n";
+    return 2;
 }

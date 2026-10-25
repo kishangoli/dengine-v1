@@ -11,9 +11,15 @@ EXECUTABLE = sys.argv.pop(1) if len(sys.argv) > 1 else "/tmp/dengine-native"
 
 
 class ProtocolTests(unittest.TestCase):
+    def test_explicit_mode_required(self):
+        completed = subprocess.run([EXECUTABLE], capture_output=True, text=True)
+        self.assertEqual(completed.returncode, 2)
+        self.assertIn("usage: dengine-native", completed.stderr)
+        self.assertEqual(completed.stdout, "")
+
     def start(self):
         process = subprocess.Popen(
-            [EXECUTABLE],
+            [EXECUTABLE, "--echo"],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
