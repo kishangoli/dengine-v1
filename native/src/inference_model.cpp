@@ -37,7 +37,11 @@ F32Tensor InferenceModel::next_token_scores(const std::vector<std::uint32_t>& in
     // to score the next token.
     const auto last = hidden.values().end() - width;
     const F32Tensor final_row(TensorShape({width}), std::vector<float>(last, hidden.values().end()));
-    const auto normalized = rms_norm(final_row, final_norm_, 1e-5f);
+    return score_last_hidden(final_row);
+}
+
+F32Tensor InferenceModel::score_last_hidden(const F32Tensor& hidden) const {
+    const auto normalized = rms_norm(hidden, final_norm_, 1e-5f);
     // SmolLM2 ties this output projection to the input embedding table.
     return matvec(embeddings_, normalized);
 }
