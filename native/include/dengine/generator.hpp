@@ -29,8 +29,13 @@ public:
 
     GenerationResult generate(std::string_view prompt, std::size_t max_new_tokens,
                               std::string_view stop = {}) const;
+    // Correctness baseline retained for comparing the cached path.
+    GenerationResult generate_uncached(std::string_view prompt, std::size_t max_new_tokens,
+                                       std::string_view stop = {}) const;
 
 private:
+    GenerationResult generate_impl(std::string_view prompt, std::size_t max_new_tokens,
+                                   std::string_view stop, bool use_cache) const;
     const InferenceModel& model_;
     const Tokenizer& tokenizer_;
 };
