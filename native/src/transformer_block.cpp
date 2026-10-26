@@ -1,5 +1,7 @@
 #include "dengine/transformer_block.hpp"
 
+#include "dengine/kv_cache.hpp"
+
 #include <cmath>
 #include <limits>
 #include <stdexcept>
@@ -91,6 +93,42 @@ F32Tensor attention(const F32Tensor& query, const F32Tensor& key,
     return result;
 }
 
+F32Tensor attention_token(const F32Tensor& query, const F32Tensor& key,
+                          const F32Tensor& value, const LayerKvCache& cache,
+                          const ModelConfig& config) {
+    const auto count = cache.length() + 1;
+    const auto head_width = config.head_size();
+    const auto group_size = config.query_heads / config.kv_heads;
+    const double scaling = 1.0 / std::sqrt(double(head_width));
+    F32Tensor result(TensorShape({config.hidden_size}));
+    for (std::size_t head = 0; head < config.query_heads; ++head) {
+        const auto kv_head = head / group_size;
+        std::vector<float> scores(count);
+        for (std::size_t previous = 0; previous < count; ++previous) {
+            const float* key_row = previous == cache.length()
+                ? key.values().data() : cache.key_row(previous);
+            double score = 0.0;
+            for (std::size_t column = 0; column < head_width; ++column) {
+                score += double(query.values()[head * head_width + column]) *
+                         key_row[kv_head * head_width + column];
+            }
+            scores[previous] = static_cast<float>(score * scaling);
+        }
+        const auto probabilities = softmax(F32Tensor(TensorShape({count}), std::move(scores)));
+        for (std::size_t column = 0; column < head_width; ++column) {
+            double sum = 0.0;
+            for (std::size_t previous = 0; previous < count; ++previous) {
+                const float* value_row = previous == cache.length()
+                    ? value.values().data() : cache.value_row(previous);
+                sum += double(probabilities.values()[previous]) *
+                       value_row[kv_head * head_width + column];
+            }
+            result.at({head * head_width + column}) = static_cast<float>(sum);
+        }
+    }
+    return result;
+}
+
 }  // namespace
 
 TransformerBlock::TransformerBlock(const LoadedModel& model, std::size_t layer)
@@ -134,6 +172,38 @@ BlockResult TransformerBlock::forward_detailed(const F32Tensor& input,
     const auto gated = multiply(silu(project_rows(gate_, feed_input)),
                                 project_rows(up_, feed_input));
     return {normalized, attention_projection, add(after_attention, project_rows(down_, gated))};
+}
+
+F32Tensor TransformerBlock::forward_token(const F32Tensor& input, LayerKvCache& cache,
+                                           std::size_t position) const {
+    if (input.shape().dimensions() != std::vector<std::size_t>{config_.hidden_size}) {
+        throw std::invalid_argument("cached transformer input must have hidden width");
+    }
+    if (cache.width() != config_.kv_heads * config_.head_size() ||
+        cache.length() != position) {
+        throw std::invalid_argument("KV cache shape or position does not match layer");
+    }
+    if (position >= cache.capacity() || position >= kInitialContextLimit ||
+        position >= config_.max_positions) {
+        throw std::out_of_range("cached transformer position exceeds context limit");
+    }
+    const auto normalized = rms_norm(input, input_norm_, kNormEpsilon);
+    auto queries = matvec(query_, normalized);
+    auto keys = matvec(key_, normalized);
+    const auto values = matvec(value_, normalized);
+    queries.reshape(TensorShape({1, config_.hidden_size}));
+    keys.reshape(TensorShape({1, cache.width()}));
+    rotate_positions(queries, config_.query_heads, config_.head_size(), position);
+    rotate_positions(keys, config_.kv_heads, config_.head_size(), position);
+    queries.reshape(TensorShape({config_.hidden_size}));
+    keys.reshape(TensorShape({cache.width()}));
+    const auto mixed = attention_token(queries, keys, values, cache, config_);
+    const auto after_attention = add(input, matvec(attention_output_, mixed));
+    const auto feed_input = rms_norm(after_attention, post_attention_norm_, kNormEpsilon);
+    const auto gated = multiply(silu(matvec(gate_, feed_input)), matvec(up_, feed_input));
+    auto output = add(after_attention, matvec(down_, gated));
+    cache.append(keys, values);
+    return output;
 }
 
 }  // namespace dengine

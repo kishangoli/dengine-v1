@@ -7,6 +7,8 @@
 
 namespace dengine {
 
+class LayerKvCache;
+
 struct BlockResult {
     F32Tensor normalized_input;
     F32Tensor attention_output;
@@ -21,6 +23,8 @@ public:
 
     F32Tensor forward(const F32Tensor& input, std::size_t start_position = 0) const;
     BlockResult forward_detailed(const F32Tensor& input, std::size_t start_position = 0) const;
+    F32Tensor forward_token(const F32Tensor& input, LayerKvCache& cache,
+                            std::size_t position) const;
     std::size_t layer() const noexcept { return layer_; }
 
 private:

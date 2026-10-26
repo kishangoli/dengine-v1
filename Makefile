@@ -1,7 +1,7 @@
 CXX = clang++
 CXXFLAGS = -std=c++17 -O2 -Wall -Wextra -Wpedantic
 NATIVE_EXE = native/dengine-native
-NATIVE_SRC = native/main.cpp native/src/generator.cpp native/src/inference_model.cpp native/src/transformer_block.cpp native/src/cpu_math.cpp native/src/tokenizer.cpp native/src/model_data.cpp native/src/model_loader.cpp
+NATIVE_SRC = native/main.cpp native/src/generator.cpp native/src/kv_cache.cpp native/src/inference_model.cpp native/src/transformer_block.cpp native/src/cpu_math.cpp native/src/tokenizer.cpp native/src/model_data.cpp native/src/model_loader.cpp
 MODEL_DATA_HEADER = native/include/dengine/model_data.hpp
 MODEL_LOADER_HEADER = native/include/dengine/model_loader.hpp
 MODEL_DATA_TEST = native/.build/test_model_data
@@ -12,18 +12,20 @@ BLOCK_TEST = native/.build/test_transformer_block
 BLOCK_HEADER = native/include/dengine/transformer_block.hpp
 INFERENCE_HEADER = native/include/dengine/inference_model.hpp
 GENERATOR_HEADER = native/include/dengine/generator.hpp
+KV_CACHE_HEADER = native/include/dengine/kv_cache.hpp
+KV_CACHE_TEST = native/.build/test_kv_cache
 FORWARD_EXE = native/dengine-forward
-FORWARD_SRC = native/forward_main.cpp native/src/inference_model.cpp native/src/transformer_block.cpp native/src/cpu_math.cpp native/src/model_data.cpp native/src/model_loader.cpp
+FORWARD_SRC = native/forward_main.cpp native/src/kv_cache.cpp native/src/inference_model.cpp native/src/transformer_block.cpp native/src/cpu_math.cpp native/src/model_data.cpp native/src/model_loader.cpp
 TOKENIZER_EXE = native/dengine-tokenizer
 TOKENIZER_SRC = native/tokenizer_main.cpp native/src/tokenizer.cpp
 TOKENIZER_HEADER = native/include/dengine/tokenizer.hpp
 JSON_HEADER = native/third_party/nlohmann/json.hpp
 
-.PHONY: all tokenizer forward test test-model test-tokenizer test-block test-forward test-generation clean
+.PHONY: all tokenizer forward test test-model test-tokenizer test-block test-forward test-generation test-cache clean
 
 all: $(NATIVE_EXE)
 
-$(NATIVE_EXE): $(NATIVE_SRC) $(GENERATOR_HEADER) $(INFERENCE_HEADER) $(BLOCK_HEADER) $(CPU_MATH_HEADER) $(TOKENIZER_HEADER) $(MODEL_DATA_HEADER) $(MODEL_LOADER_HEADER) $(JSON_HEADER)
+$(NATIVE_EXE): $(NATIVE_SRC) $(GENERATOR_HEADER) $(KV_CACHE_HEADER) $(INFERENCE_HEADER) $(BLOCK_HEADER) $(CPU_MATH_HEADER) $(TOKENIZER_HEADER) $(MODEL_DATA_HEADER) $(MODEL_LOADER_HEADER) $(JSON_HEADER)
 	$(CXX) $(CXXFLAGS) -I native/include -I native/third_party $(NATIVE_SRC) -licucore -o $(NATIVE_EXE)
 
 $(MODEL_DATA_TEST): native/tests/test_model_data.cpp native/src/model_data.cpp $(MODEL_DATA_HEADER)
@@ -38,15 +40,19 @@ $(CPU_MATH_TEST): native/tests/test_cpu_math.cpp native/src/cpu_math.cpp native/
 	mkdir -p native/.build
 	$(CXX) $(CXXFLAGS) -I native/include native/tests/test_cpu_math.cpp native/src/cpu_math.cpp native/src/model_data.cpp -o $(CPU_MATH_TEST)
 
-$(BLOCK_TEST): native/tests/test_transformer_block.cpp native/src/transformer_block.cpp native/src/cpu_math.cpp native/src/model_data.cpp native/src/model_loader.cpp $(BLOCK_HEADER) $(CPU_MATH_HEADER) $(MODEL_DATA_HEADER) $(MODEL_LOADER_HEADER) $(JSON_HEADER)
+$(BLOCK_TEST): native/tests/test_transformer_block.cpp native/src/kv_cache.cpp native/src/inference_model.cpp native/src/transformer_block.cpp native/src/cpu_math.cpp native/src/model_data.cpp native/src/model_loader.cpp $(KV_CACHE_HEADER) $(INFERENCE_HEADER) $(BLOCK_HEADER) $(CPU_MATH_HEADER) $(MODEL_DATA_HEADER) $(MODEL_LOADER_HEADER) $(JSON_HEADER)
 	mkdir -p native/.build
-	$(CXX) $(CXXFLAGS) -I native/include -I native/third_party native/tests/test_transformer_block.cpp native/src/transformer_block.cpp native/src/cpu_math.cpp native/src/model_data.cpp native/src/model_loader.cpp -o $(BLOCK_TEST)
+	$(CXX) $(CXXFLAGS) -I native/include -I native/third_party native/tests/test_transformer_block.cpp native/src/kv_cache.cpp native/src/inference_model.cpp native/src/transformer_block.cpp native/src/cpu_math.cpp native/src/model_data.cpp native/src/model_loader.cpp -o $(BLOCK_TEST)
+
+$(KV_CACHE_TEST): native/tests/test_kv_cache.cpp native/src/generator.cpp native/src/kv_cache.cpp native/src/inference_model.cpp native/src/transformer_block.cpp native/src/cpu_math.cpp native/src/tokenizer.cpp native/src/model_data.cpp native/src/model_loader.cpp $(GENERATOR_HEADER) $(KV_CACHE_HEADER) $(INFERENCE_HEADER) $(BLOCK_HEADER) $(CPU_MATH_HEADER) $(TOKENIZER_HEADER) $(MODEL_DATA_HEADER) $(MODEL_LOADER_HEADER) $(JSON_HEADER)
+	mkdir -p native/.build
+	$(CXX) $(CXXFLAGS) -I native/include -I native/third_party native/tests/test_kv_cache.cpp native/src/generator.cpp native/src/kv_cache.cpp native/src/inference_model.cpp native/src/transformer_block.cpp native/src/cpu_math.cpp native/src/tokenizer.cpp native/src/model_data.cpp native/src/model_loader.cpp -licucore -o $(KV_CACHE_TEST)
 
 tokenizer: $(TOKENIZER_EXE)
 
 forward: $(FORWARD_EXE)
 
-$(FORWARD_EXE): $(FORWARD_SRC) $(INFERENCE_HEADER) $(BLOCK_HEADER) $(CPU_MATH_HEADER) $(MODEL_DATA_HEADER) $(MODEL_LOADER_HEADER) $(JSON_HEADER)
+$(FORWARD_EXE): $(FORWARD_SRC) $(KV_CACHE_HEADER) $(INFERENCE_HEADER) $(BLOCK_HEADER) $(CPU_MATH_HEADER) $(MODEL_DATA_HEADER) $(MODEL_LOADER_HEADER) $(JSON_HEADER)
 	$(CXX) $(CXXFLAGS) -I native/include -I native/third_party $(FORWARD_SRC) -o $(FORWARD_EXE)
 
 $(TOKENIZER_EXE): $(TOKENIZER_SRC) $(TOKENIZER_HEADER) $(JSON_HEADER)
@@ -72,6 +78,9 @@ test-forward: $(FORWARD_EXE)
 
 test-generation: $(NATIVE_EXE)
 	native/reference/.venv/bin/python native/tests/test_generation_reference.py $(NATIVE_EXE) native/models/smollm2-135m-instruct
+
+test-cache: $(KV_CACHE_TEST)
+	./$(KV_CACHE_TEST) native/models/smollm2-135m-instruct
 
 clean:
 	rm -f $(NATIVE_EXE)
